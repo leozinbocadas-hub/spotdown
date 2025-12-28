@@ -51,8 +51,17 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
         console.log(`[WORKER] Iniciando: ${title} - ${artist}`);
         const searchQuery = `${title} ${artist} audio`;
 
-        // Usar o ffmpeg-static para garantir que a conversão funcione
-        const ytDlpCommand = `yt-dlp -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --add-header "User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -o "${downloadedFilePath}" "ytsearch1:${searchQuery}"`;
+        // COMANDO MELHORADO: Usa Deno (se disponível), desativa certificados e usa um User-Agent mais comum
+        // Além disso, adiciona flags para evitar 403 e captchas
+        const ytDlpCommand = `yt-dlp -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" \
+            --no-check-certificates \
+            --geo-bypass \
+            --no-warnings \
+            --prefer-free-formats \
+            --add-header "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" \
+            --add-header "Accept-Language:en-US,en;q=0.9" \
+            --add-header "User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -o "${downloadedFilePath}" "ytsearch1:${searchQuery}"`;
 
         await new Promise((resolve, reject) => {
             exec(ytDlpCommand, (error, stdout, stderr) => {

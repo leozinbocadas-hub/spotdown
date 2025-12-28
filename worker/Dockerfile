@@ -1,12 +1,15 @@
 # Usar Node.js como base
 FROM node:20-slim
 
-# Instalar dependências do sistema (Python, FFmpeg e ferramentas de rede)
+# Instalar dependências do sistema (Python, FFmpeg, ferramentas de rede e Deno)
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     ffmpeg \
     curl \
+    unzip \
+    && curl -fsSL https://deno.land/install.sh | sh \
+    && ln -s /root/.deno/bin/deno /usr/bin/deno \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar yt-dlp manualmente via curl para garantir a versão mais recente
