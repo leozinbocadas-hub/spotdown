@@ -48,8 +48,7 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
     let errorMessage = null;
 
     try {
-        console.log(`[WORKER] Iniciando: ${title} - ${artist}`);
-        const searchQuery = `${title} ${artist} audio`;
+        console.log(`[WORKER] Iniciando (spotDL): ${title} - ${artist}`);
 
         let cookiesFlag = '';
         const cookiesContent = process.env.YT_COOKIES;
@@ -57,30 +56,23 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
 
         if (cookiesContent) {
             await fs.writeFile(cookiesPath, cookiesContent);
-            cookiesFlag = `--cookies "${cookiesPath}"`;
-            console.log(`[WORKER] Usando cookies para o download.`);
+            // No spotDL a flag de cookies é diferente
+            cookiesFlag = `--cookie-file "${cookiesPath}"`;
         }
 
-        // COMANDO MELHORADO: Usa Deno (se disponível), desativa certificados e usa um User-Agent mais comum
-        const ytDlpCommand = `yt-dlp -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" \
-            ${cookiesFlag} \
-            --no-check-certificates \
-            --geo-bypass \
-            --no-warnings \
-            --prefer-free-formats \
-            --add-header "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" \
-            --add-header "Accept-Language:en-US,en;q=0.9" \
-            --add-header "User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -o "${downloadedFilePath}" "ytsearch1:${searchQuery}"`;
+        // spotDL é muito mais resiliente que o yt-dlp puro
+        // Ele busca no YouTube Music e outros, e já coloca os metadados
+        const spotifyUrl = `https://open.spotify.com/track/${spotify_track_id}`;
+        const spotdlCommand = `spotdl download "${spotifyUrl}" --format mp3 --output "${downloadedFilePath}" ${cookiesFlag} --no-cache`;
 
         await new Promise((resolve, reject) => {
-            exec(ytDlpCommand, async (error, stdout, stderr) => {
+            exec(spotdlCommand, async (error, stdout, stderr) => {
                 // Deletar o arquivo de cookies temporário por segurança
                 if (cookiesContent) await fs.unlink(cookiesPath).catch(() => null);
 
                 if (error) {
-                    console.error(`[YT-DLP ERROR] ${stderr}`);
-                    return reject(new Error(`Falha no yt-dlp: ${stderr}`));
+                    console.error(`[SPOTDL ERROR] ${stderr}`);
+                    return reject(new Error(`Falha no spotDL: ${stderr}`));
                 }
                 resolve(stdout);
             });
