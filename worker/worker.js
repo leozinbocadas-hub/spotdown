@@ -51,9 +51,19 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
         console.log(`[WORKER] Iniciando: ${title} - ${artist}`);
         const searchQuery = `${title} ${artist} audio`;
 
+        let cookiesFlag = '';
+        const cookiesContent = process.env.YT_COOKIES;
+        const cookiesPath = path.join(taskDir, 'cookies.txt');
+
+        if (cookiesContent) {
+            await fs.writeFile(cookiesPath, cookiesContent);
+            cookiesFlag = `--cookies "${cookiesPath}"`;
+            console.log(`[WORKER] Usando cookies para o download.`);
+        }
+
         // COMANDO MELHORADO: Usa Deno (se disponível), desativa certificados e usa um User-Agent mais comum
-        // Além disso, adiciona flags para evitar 403 e captchas
         const ytDlpCommand = `yt-dlp -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" \
+            ${cookiesFlag} \
             --no-check-certificates \
             --geo-bypass \
             --no-warnings \
@@ -64,7 +74,10 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
             -o "${downloadedFilePath}" "ytsearch1:${searchQuery}"`;
 
         await new Promise((resolve, reject) => {
-            exec(ytDlpCommand, (error, stdout, stderr) => {
+            exec(ytDlpCommand, async (error, stdout, stderr) => {
+                // Deletar o arquivo de cookies temporário por segurança
+                if (cookiesContent) await fs.unlink(cookiesPath).catch(() => null);
+
                 if (error) {
                     console.error(`[YT-DLP ERROR] ${stderr}`);
                     return reject(new Error(`Falha no yt-dlp: ${stderr}`));
