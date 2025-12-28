@@ -4,14 +4,12 @@ import { cookies } from 'next/headers'
 export async function createClient() {
   const cookieStore = await cookies()
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  // No servidor, priorizamos chaves SEM o prefixo NEXT_PUBLIC_ para evitar que o Next.js "grave" os placeholders
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('[SUPABASE DEBUG] Falha: Chaves não encontradas no process.env');
-  } else {
-    console.log(`[SUPABASE DEBUG] URL: ${supabaseUrl.substring(0, 10)}...`);
-    console.log(`[SUPABASE DEBUG] Key (inicio...fim): ${supabaseAnonKey.substring(0, 5)}...${supabaseAnonKey.substring(supabaseAnonKey.length - 5)}`);
+  if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
+    console.error('[SUPABASE] Erro: URL não configurada ou é um placeholder!');
   }
 
   return createServerClient(
