@@ -25,7 +25,7 @@ const r2 = new S3Client({
     },
 });
 
-const CONCURRENT_DOWNLOADS_LIMIT = 5;
+const CONCURRENT_DOWNLOADS_LIMIT = 10;
 const downloadLimiter = pLimit(CONCURRENT_DOWNLOADS_LIMIT);
 
 // Garantir que a pasta tmp existe
