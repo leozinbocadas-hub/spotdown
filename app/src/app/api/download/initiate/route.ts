@@ -21,7 +21,7 @@ export async function POST(request: Request) {
         const supabase = await createClient();
 
         // 1. Criar tarefa (anonimizada se não houver usuário)
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { session } } = await supabase.auth.getSession();
 
         const insertData: any = {
             spotify_playlist_url: spotifyPlaylistUrl,
@@ -30,8 +30,8 @@ export async function POST(request: Request) {
             status: 'pending',
         };
 
-        if (user) {
-            insertData.user_id = user.id;
+        if (session?.user) {
+            insertData.user_id = session.user.id;
         }
 
         const { data: task, error: taskError } = await supabase
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
                 task_id: task.id,
                 payload: {
                     spotifyPlaylistUrl,
-                    userId: user?.id || null,
+                    userId: session?.user?.id || null,
                     downloadTaskId: task.id,
                 },
             });

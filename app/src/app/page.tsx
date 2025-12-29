@@ -17,7 +17,8 @@ import {
   ArrowLeft,
   ChevronRight,
   History,
-  Trash2
+  Trash2,
+  UserCircle2
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -57,14 +58,26 @@ export default function App() {
   const supabase = createClient();
   const progressInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Load History
+  // Load History (Filtered by User)
   useEffect(() => {
     const fetchHistory = async () => {
-      const { data } = await supabase
+      const { data: { user } } = await supabase.auth.getUser();
+
+      let query = supabase
         .from("download_tasks")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(10);
+
+      // Se houver usuário, filtra pelo ID dele. Se não, não mostra nada (Privacidade)
+      if (user) {
+        query = query.eq("user_id", user.id);
+      } else {
+        setHistory([]);
+        return;
+      }
+
+      const { data } = await query;
       if (data) setHistory(data);
     };
     fetchHistory();
@@ -186,8 +199,8 @@ export default function App() {
             <History size={20} className="mr-2" />
             Histórico
           </Button>
-          <div className="h-8 w-8 bg-[#1DB954] rounded-full flex items-center justify-center text-black font-black text-xs">
-            L
+          <div className="h-10 w-10 text-[#1DB954] hover:text-[#1ed760] transition-colors cursor-pointer">
+            <UserCircle2 size={40} strokeWidth={1.5} />
           </div>
         </div>
       </nav>
