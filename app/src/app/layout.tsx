@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "SpotDown | Seu Downloader de Spotify",
   description: "Baixe suas playlists do Spotify com facilidade e rapidez.",
+  icons: {
+    icon: '/icon.png',
+  }
 };
 
 export default function RootLayout({
