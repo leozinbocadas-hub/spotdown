@@ -52,24 +52,30 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
     let errorMessage = null;
 
     try {
-        // 1. Limpeza agressiva do título
-        const cleanTitle = title.split(' (')[0].split(' - ')[0].replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+        // 1. Limpeza inteligente e preparação de queries
+        const cleanTitle = title.replace(/["']/g, '');
+        const cleanArtist = artist.split(',')[0].trim();
 
-        // 2. Artistas simplificados
-        const firstTwoArtists = artist.split(',').slice(0, 2).map(a => a.trim()).join(' ');
-        const cleanArtists = firstTwoArtists.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+        const queries = [
+            `${cleanTitle} ${cleanArtist}`, // Pista completa
+            `${cleanArtist} - ${cleanTitle}`, // Formato SoundCloud
+            cleanTitle // Apenas título
+        ];
 
-        const specificQuery = `${cleanTitle} ${cleanArtists}`;
-        const broadQuery = cleanTitle;
         const expectedSeconds = Math.floor(trackData.duration_ms / 1000);
-
-        // 3. Janela dinâmica
-        const margin = expectedSeconds > 300 ? 50 : 30;
+        const margin = expectedSeconds > 300 ? 60 : 30;
         const minDur = Math.max(0, expectedSeconds - margin);
         const maxDur = expectedSeconds + margin;
-        const durationFilter = `--match-filter "duration > ${minDur} & duration < ${maxDur}"`;
 
-        console.log(`[WORKER] Iniciando busca: ${title} - ${artist} (Duração esperada: ${expectedSeconds}s)`);
+        // Filtro Anti-Cover/Karaoke
+        let avoidFilter = '';
+        if (!cleanTitle.toLowerCase().includes('cover') && !cleanTitle.toLowerCase().includes('karaoke')) {
+            avoidFilter = ' & title !~* "cover" & title !~* "karaoke"';
+        }
+
+        const durationFilter = `--match-filter "duration > ${minDur} & duration < ${maxDur}${avoidFilter}"`;
+
+        console.log(`[WORKER] Iniciando busca: ${title} - ${artist} (${expectedSeconds}s)`);
 
         let cookiesFlag = '';
         const rootCookiesPath = path.join(__dirname, 'cookies.txt');
@@ -78,44 +84,14 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
             cookiesFlag = `--cookies "${rootCookiesPath}"`;
         } catch (e) { }
 
-        // --- TENTATIVA 1: DEEZER (POOL DE TOKENS) ---
-        if (process.env.DEEZER_ARL) {
-            const arlPool = process.env.DEEZER_ARL.split(',').map(t => t.trim()).filter(t => t);
-            const randomArl = arlPool[Math.floor(Math.random() * arlPool.length)];
+        let hasFile = false;
 
-            console.log(`[WORKER] [DEEZER] Buscando (Usando 1 de ${arlPool.length} tokens): ${specificQuery}`);
-            try {
-                const dzSearchUrl = `https://api.deezer.com/search?q=track:"${cleanTitle}" artist:"${cleanArtists}"`;
-                const dzResponse = await axios.get(dzSearchUrl, { timeout: 5000 });
-                const dzTrack = dzResponse.data.data?.find(t =>
-                    Math.abs(t.duration - expectedSeconds) < 15
-                );
+        // --- TENTATIVA 1: SOUNDCLOUD (BUSCA REFORÇADA) ---
+        for (const query of queries) {
+            if (hasFile) break;
+            console.log(`[WORKER] [SOUNDCLOUD] Tentando: ${query}`);
+            const scCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist ${durationFilter} --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "scsearch15:${query}"`;
 
-                if (dzTrack) {
-                    console.log(`[WORKER] [DEEZER] Match: ${dzTrack.title} (${dzTrack.duration}s). Baixando...`);
-                    const dzCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --add-header "Cookie:arl=${randomArl}" --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "${dzTrack.link}"`;
-
-                    await new Promise((resolve, reject) => {
-                        let timeout;
-                        const childProcess = exec(dzCommand, (error) => {
-                            if (timeout) clearTimeout(timeout);
-                            if (error) reject(error);
-                            else resolve();
-                        });
-                        timeout = setTimeout(() => { childProcess.kill(); reject(new Error('Timeout Deezer')); }, 60000);
-                    });
-                }
-            } catch (e) {
-                console.warn(`[WORKER] [DEEZER] Falhou: ${e.message}`);
-            }
-        }
-
-        let hasFile = await fs.stat(downloadedFilePath).catch(() => null);
-
-        // --- TENTATIVA 2: SOUNDCLOUD (SPECIFIC) ---
-        if (!hasFile) {
-            console.log(`[WORKER] [SOUNDCLOUD] Buscando específico: ${specificQuery}`);
-            const scCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist ${durationFilter} --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "scsearch10:${specificQuery}"`;
             try {
                 await new Promise((resolve, reject) => {
                     let timeout;
@@ -128,61 +104,35 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
                 });
                 hasFile = await fs.stat(downloadedFilePath).catch(() => null);
             } catch (e) {
-                // broad
-                if (!await fs.stat(downloadedFilePath).catch(() => null)) {
-                    console.log(`[WORKER] [SOUNDCLOUD] Buscando amplo: ${broadQuery}`);
-                    const scBroad = `yt-dlp --force-ipv4 -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist ${durationFilter} --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "scsearch10:${broadQuery}"`;
-                    try {
-                        await new Promise((resolve, reject) => {
-                            let timeout;
-                            const childProcess = exec(scBroad, (err) => {
-                                if (timeout) clearTimeout(timeout);
-                                if (err) reject(err);
-                                else resolve();
-                            });
-                            timeout = setTimeout(() => { childProcess.kill(); reject(new Error('Timeout SC Broad')); }, 60000);
-                        });
-                        hasFile = await fs.stat(downloadedFilePath).catch(() => null);
-                    } catch (e2) { }
-                }
+                console.warn(`[WORKER] [SOUNDCLOUD] Falha na query "${query}": ${e.message}`);
             }
         }
 
-        // --- TENTATIVA 3: VIMEO ---
+        // --- TENTATIVA 2: YOUTUBE (BYPASS DE DISPOSITIVO MÓVEL) ---
         if (!hasFile) {
-            console.log(`[WORKER] [VIMEO] Buscando: ${specificQuery}`);
-            const vimeoCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist ${durationFilter} --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "vsearch5:${specificQuery}"`;
+            console.warn(`[WORKER] [YOUTUBE] SoundCloud falhou. Usando YouTube com bypass avançado...`);
+            const ytDlpCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 ${cookiesFlag} --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist ${durationFilter} --match-filter "!is_live & !is_upcoming" --extractor-args "youtube:player_client=mweb,ios,android_web" --add-header "Accept-Language: pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7" --add-header "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1" --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "ytsearch3:${queries[0]}"`;
+
             try {
                 await new Promise((resolve, reject) => {
                     let timeout;
-                    const childProcess = exec(vimeoCommand, (error) => {
+                    const childProcess = exec(ytDlpCommand, (error, stdout, stderr) => {
                         if (timeout) clearTimeout(timeout);
-                        if (error) reject(error);
+                        if (error) {
+                            console.error(`[WORKER] [YOUTUBE ERROR] ${stderr || error.message}`);
+                            reject(error);
+                        }
                         else resolve();
                     });
-                    timeout = setTimeout(() => { childProcess.kill(); reject(new Error('Timeout Vimeo')); }, 60000);
+                    timeout = setTimeout(() => { childProcess.kill(); reject(new Error('Timeout YouTube')); }, 90000);
                 });
                 hasFile = await fs.stat(downloadedFilePath).catch(() => null);
-            } catch (e) { }
+            } catch (ytError) {
+                console.error(`[WORKER] [YOUTUBE] Falha final: ${ytError.message}`);
+            }
         }
 
-        // --- TENTATIVA 4: YOUTUBE ---
-        if (!hasFile) {
-            console.warn(`[WORKER] Outras fontes falharam. Usando YouTube com bypass...`);
-            const ytDlpCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 ${cookiesFlag} --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist ${durationFilter} --match-filter "!is_live & !is_upcoming" --extractor-args "youtube:player_client=ios,web_embedded" --add-header "User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "ytsearch5:${specificQuery}"`;
-            await new Promise((resolve, reject) => {
-                let timeout;
-                const childProcess = exec(ytDlpCommand, (error) => {
-                    if (timeout) clearTimeout(timeout);
-                    if (error) reject(error);
-                    else resolve();
-                });
-                timeout = setTimeout(() => { childProcess.kill(); reject(new Error('Timeout YouTube')); }, 90000);
-            });
-            hasFile = await fs.stat(downloadedFilePath).catch(() => null);
-        }
-
-        if (!hasFile) throw new Error('Música não encontrada em nenhuma fonte (SC/Vimeo/YT).');
+        if (!hasFile) throw new Error('Música não encontrada no SoundCloud ou YouTube dentro dos parâmetros.');
 
         // Tagging
         const tags = {
