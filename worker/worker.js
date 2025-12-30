@@ -71,11 +71,11 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
         // Filtro Anti-Cover/Karaoke (Sintaxe correta para yt-dlp)
         let avoidFilter = '';
         if (!cleanTitle.toLowerCase().includes('cover') && !cleanTitle.toLowerCase().includes('karaoke')) {
-            // !title ~= "(?i)cover" significa: NÃO contém "cover" (case-insensitive)
-            avoidFilter = ' & !title ~= "(?i)cover" & !title ~= "(?i)karaoke"';
+            // title !~= "(?i)cover" significa: Título NÃO contém "cover" (case-insensitive)
+            avoidFilter = ' & title!~="(?i)cover" & title!~="(?i)karaoke"';
         }
 
-        const durationFilter = `duration > ${minDur} & duration < ${maxDur}${avoidFilter}`;
+        const durationFilter = `duration>${minDur} & duration<${maxDur}${avoidFilter}`;
 
         console.log(`[WORKER] Iniciando busca: ${title} - ${artist} (${expectedSeconds}s)`);
 
