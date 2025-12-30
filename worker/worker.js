@@ -54,28 +54,25 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
     // --- INÍCIO DA LÓGICA DE DOWNLOAD ---
     try {
         // 1. Limpeza inteligente e preparação de queries
-        const cleanTitle = title.replace(/["']/g, '');
-        const cleanArtist = artist.split(',')[0].trim();
+        // Remove emojis e caracteres que podem quebrar o terminal
+        const cleanForSearch = (str) => str.replace(/[^\p{L}\p{N}\s\-]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+        const safeTitle = cleanForSearch(title);
+        const safeArtist = cleanForSearch(artist.split(',')[0]);
 
         const queries = [
-            `${cleanTitle} ${cleanArtist}`, // Pista completa
-            `${cleanArtist} - ${cleanTitle}`, // Formato SoundCloud
-            cleanTitle // Apenas título
+            `${safeTitle} ${safeArtist}`,
+            `${safeArtist} - ${safeTitle}`,
+            safeTitle
         ];
 
         const expectedSeconds = Math.floor(trackData.duration_ms / 1000);
-        const margin = expectedSeconds > 300 ? 60 : 30;
-        const minDur = Math.max(0, expectedSeconds - margin);
-        const maxDur = expectedSeconds + margin;
 
-        // Filtro Anti-Cover/Karaoke (Sintaxe correta para yt-dlp)
+        // Filtro Anti-Cover/Karaoke simplificado
         let avoidFilter = '';
-        if (!cleanTitle.toLowerCase().includes('cover') && !cleanTitle.toLowerCase().includes('karaoke')) {
-            // title !~= "(?i)cover" significa: Título NÃO contém "cover" (case-insensitive)
-            avoidFilter = ' & title!~="(?i)cover" & title!~="(?i)karaoke"';
+        if (!title.toLowerCase().includes('cover') && !title.toLowerCase().includes('karaoke')) {
+            avoidFilter = ' & title!*="cover" & title!*="karaoke"';
         }
-
-        const durationFilter = `duration>${minDur} & duration<${maxDur}${avoidFilter}`;
 
         console.log(`[WORKER] Iniciando busca: ${title} - ${artist} (${expectedSeconds}s)`);
 
@@ -89,11 +86,13 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
         let hasFile = false;
 
         // --- TENTATIVA 1: SOUNDCLOUD (BUSCA REFORÇADA) ---
+        const scMargin = expectedSeconds > 300 ? 60 : 30;
+        const scFilter = `duration>${expectedSeconds - scMargin} & duration<${expectedSeconds + scMargin}${avoidFilter}`;
+
         for (const query of queries) {
             if (hasFile) break;
             console.log(`[WORKER] [SOUNDCLOUD] Tentando: ${query}`);
-            // Usamos aspas simples no --match-filter para não conflitar com as aspas duplas do regex
-            const scCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist --match-filter '${durationFilter}' --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "scsearch15:${query}"`;
+            const scCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist --match-filter '${scFilter}' --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "scsearch15:${query}"`;
 
             try {
                 await new Promise((resolve, reject) => {
@@ -111,10 +110,13 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
             }
         }
 
-        // --- TENTATIVA 2: YOUTUBE (BYPASS DE DISPOSITIVO MÓVEL) ---
+        // --- TENTATIVA 2: YOUTUBE (FILTRO MAIS FLEXÍVEL PARA CLIPS) ---
         if (!hasFile) {
             console.warn(`[WORKER] [YOUTUBE] SoundCloud falhou. Usando YouTube com bypass avançado...`);
-            const ytDlpCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 ${cookiesFlag} --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist --match-filter '${durationFilter}' --match-filter "!is_live & !is_upcoming" --extractor-args "youtube:player_client=mweb,ios,android_web" --add-header "Accept-Language: pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7" --add-header "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1" --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "ytsearch3:${queries[0]}"`;
+            // No YouTube a margem é maior (60s) pois vídeos oficiais tem intro/vlog
+            const ytFilter = `duration>${expectedSeconds - 60} & duration<${expectedSeconds + 90}${avoidFilter}`;
+
+            const ytDlpCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 ${cookiesFlag} --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist --match-filter '${ytFilter}' --match-filter "!is_live & !is_upcoming" --extractor-args "youtube:player_client=mweb,ios,android_web" --add-header "Accept-Language: pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7" --add-header "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1" --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "ytsearch10:${queries[0]}"`;
 
             try {
                 await new Promise((resolve, reject) => {
