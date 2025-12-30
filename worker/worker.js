@@ -54,14 +54,15 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
     try {
         // Limpeza que remove apenas caracteres de sistema, preservando letras de qualquer idioma e acentos
         const cleanTitle = title.replace(/\(.*\)|\[.*\]/g, '').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
-        const firstArtist = artist.split(',')[0].replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
-        const searchQuery = `${cleanTitle} ${firstArtist}`;
+        // Usar todos os artistas para ser mais específico e evitar resultados genéricos
+        const cleanArtists = artist.replace(/[^\p{L}\p{N}\s,]/gu, ' ').replace(/\s+/g, ' ').trim();
+        const searchQuery = `${cleanTitle} ${cleanArtists}`;
         const expectedSeconds = Math.floor(trackData.duration_ms / 1000);
 
-        // Filtro de duração: a música deve ter pelo menos 80% da duração esperada ou pelo menos 60s se a música for longa
-        // Isso evita previews de 30s do SoundCloud ou teasers do YouTube
-        const minDuration = expectedSeconds > 60 ? Math.min(60, expectedSeconds - 20) : expectedSeconds - 5;
-        const durationFilter = `--match-filter "duration > ${minDuration}"`;
+        // Janela de duração estrita: +/- 12 segundos para evitar remixes ou versões erradas
+        const minDur = Math.max(0, expectedSeconds - 12);
+        const maxDur = expectedSeconds + 12;
+        const durationFilter = `--match-filter "duration > ${minDur} & duration < ${maxDur}"`;
 
         console.log(`[WORKER] Iniciando busca: ${title} - ${artist} (Duração esperada: ${expectedSeconds}s)`);
         console.log(`[WORKER] Query refinada: ${searchQuery}`);
