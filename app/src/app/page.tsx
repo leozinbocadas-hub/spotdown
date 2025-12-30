@@ -58,7 +58,7 @@ export default function App() {
   const supabase = createClient();
   const progressInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Load History (Filtered by User)
+  // Load History (Filtered by User or Local Storage)
   useEffect(() => {
     const fetchHistory = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -67,14 +67,19 @@ export default function App() {
         .from("download_tasks")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(20);
 
-      // Se houver usuário, filtra pelo ID dele. Se não, não mostra nada (Privacidade)
       if (user) {
         query = query.eq("user_id", user.id);
       } else {
-        setHistory([]);
-        return;
+        // Fallback for anonymous users: use localStorage IDs
+        const localHistory = JSON.parse(localStorage.getItem("spotdown_history") || "[]");
+        if (localHistory.length > 0) {
+          query = query.in("id", localHistory);
+        } else {
+          setHistory([]);
+          return;
+        }
       }
 
       const { data } = await query;
@@ -147,6 +152,11 @@ export default function App() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+
+      // Save to local storage for history (anonymous fallback)
+      const currentHistory = JSON.parse(localStorage.getItem("spotdown_history") || "[]");
+      const updatedHistory = [data.downloadTaskId, ...currentHistory].slice(0, 50);
+      localStorage.setItem("spotdown_history", JSON.stringify(updatedHistory));
 
       // Fetch the full task object
       const { data: taskData } = await supabase

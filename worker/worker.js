@@ -70,7 +70,12 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
 
         try {
             await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Timeout na execução do yt-dlp'));
+                }, 60000); // 60 segundos de timeout
+
                 exec(scCommand, (error, stdout, stderr) => {
+                    clearTimeout(timeout);
                     if (error) reject(error);
                     else resolve(stdout);
                 });
@@ -90,7 +95,12 @@ async function downloadAndTagTrack(trackData, downloadTaskId) {
             const ytDlpCommand = `yt-dlp --force-ipv4 -x --audio-format mp3 ${cookiesFlag} --ffmpeg-location "${ffmpegPath}" --no-check-certificates --geo-bypass --no-playlist --match-filter "!is_live & !is_upcoming" --add-header "User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" --extract-audio --audio-quality 0 -o "${downloadedFilePath}" "ytsearch1:${searchQuery}"`;
 
             await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Timeout na execução do yt-dlp (YouTube)'));
+                }, 90000); // 90 segundos para o YouTube (costuma ser mais lento)
+
                 exec(ytDlpCommand, (error, stdout, stderr) => {
+                    clearTimeout(timeout);
                     if (error) {
                         console.error(`[WORKER] YouTube Erro para "${title}": ${stderr.slice(0, 100)}`);
                         reject(new Error(`Falha total: Nenhuma fonte encontrou a música.`));
@@ -237,6 +247,21 @@ async function processDownloadTask(job) {
 
         const downloadPromises = playlistTracks.map((track, index) =>
             downloadLimiter(async () => {
+                // Marcar como baixando no banco e broadcast
+                await supabase.from('playlist_tracks')
+                    .update({ status: 'downloading' })
+                    .eq('task_id', downloadTaskId)
+                    .eq('spotify_track_id', track.spotify_track_id);
+
+                await supabase.channel(`task_${downloadTaskId}`).send({
+                    type: 'broadcast',
+                    event: 'track_update',
+                    payload: {
+                        trackId: track.spotify_track_id,
+                        status: 'downloading'
+                    }
+                });
+
                 const { downloadUrl, errorMessage } = await downloadAndTagTrack(track, downloadTaskId);
 
                 await supabase.from('playlist_tracks')
@@ -250,7 +275,7 @@ async function processDownloadTask(job) {
 
                 if (downloadUrl) tracksDownloaded++;
 
-                // Notificar frontend sobre a track específica
+                // Notificar frontend sobre a track específica (finalizado)
                 await supabase.channel(`task_${downloadTaskId}`).send({
                     type: 'broadcast',
                     event: 'track_update',
@@ -390,14 +415,27 @@ async function startWorker() {
 
     // Polling inicial para jobs pendentes
     const pollJobs = async () => {
+        // 1. Buscar jobs pendentes
         const { data: pendingJobs } = await supabase
             .from('jobs')
             .select('*')
             .eq('status', 'pending')
             .order('created_at', { ascending: true });
 
-        if (pendingJobs && pendingJobs.length > 0) {
-            for (const job of pendingJobs) {
+        // 2. Buscar jobs que estão 'processing' há muito tempo (stuck jobs)
+        // Se um job está processando por mais de 30 minutos, provavelmente o worker caiu
+        const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data: stuckJobs } = await supabase
+            .from('jobs')
+            .select('*')
+            .eq('status', 'processing')
+            .lt('started_at', thirtyMinsAgo)
+            .order('created_at', { ascending: true });
+
+        const allJobs = [...(pendingJobs || []), ...(stuckJobs || [])];
+
+        if (allJobs.length > 0) {
+            for (const job of allJobs) {
                 await processDownloadTask(job);
             }
         }
